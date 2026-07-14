@@ -1102,13 +1102,29 @@ static func _crash_body_for_state(state: int, server_status: Dictionary = {}) ->
 				return foreign_message
 			return "Another process is already bound to port %d. Pick a free port or stop the other process." % port
 		ServerStateScript.CRASHED:
-			## Both spawn attempts failed on the uvx tier — almost always
-			## means PyPI hasn't propagated this version yet (~10 min after
-			## publish). `_start_server` already tried `--refresh` once, so
-			## the next realistic move is to wait and reload.
+			## Both spawn attempts failed on the uvx tier — stock releases:
+			## PyPI lag. Local forks (version with +tag): almost always the
+			## dev venv was not found (unresolved junction) so uvx tried a
+			## non-existent package pin.
 			if ClientConfigurator.get_server_launch_mode() == "uvx":
 				var version := ClientConfigurator.get_plugin_version()
-				return "The server exited before the WebSocket handshake, even after a `uvx --refresh` retry. If this is a brand-new release, PyPI's index may still be propagating (~10 min). Wait a moment and click Reload Plugin to retry, or check Godot's output log for Python's traceback. Target: godot-ai==%s." % version
+				var pin := ClientConfigurator._pypi_pin_version(version)
+				if pin != version:
+					return (
+						"The server exited before the WebSocket handshake. "
+						+ "Local plugin is %s (fork) — uvx would need PyPI godot-ai==%s, which has no Grok extras. "
+						+ "Fix: ensure the fork checkout has `.venv` (run setup-dev.ps1) and addons/godot_ai is a junction into that checkout; "
+						+ "or set env GODOT_AI_VENV_PYTHON to the fork python.exe. Then Reload Plugin. "
+						+ "Log should show 'MCP | using dev venv: ...'."
+						% [version, pin]
+					)
+				return (
+					"The server exited before the WebSocket handshake, even after a `uvx --refresh` retry. "
+					+ "If this is a brand-new release, PyPI's index may still be propagating (~10 min). "
+					+ "Wait a moment and click Reload Plugin to retry, or check Godot's output log for Python's traceback. "
+					+ "Target: godot-ai==%s."
+					% pin
+				)
 			return "The server exited before the WebSocket handshake. Check Godot's output log (bottom panel) for Python's traceback."
 		ServerStateScript.NO_COMMAND:
 			return "No godot-ai server found. Install `uv` via the Setup panel above, or run `pip install godot-ai`."
@@ -1628,16 +1644,11 @@ func _install_mode_tooltip() -> String:
 
 
 func _resolve_plugin_symlink_target() -> String:
-	var addons_path := ProjectSettings.globalize_path("res://addons/godot_ai")
-	var dir := DirAccess.open(addons_path.get_base_dir())
-	if dir == null or not dir.is_link(addons_path):
+	var logical := ProjectSettings.globalize_path("res://addons/godot_ai").rstrip("/").rstrip("\\")
+	var resolved := ClientConfigurator.resolve_addons_realpath()
+	if resolved.is_empty() or resolved == logical:
 		return ""
-	var target := dir.read_link(addons_path)
-	if target.is_empty():
-		return ""
-	if target.is_relative_path():
-		target = addons_path.get_base_dir().path_join(target).simplify_path()
-	return target
+	return resolved
 
 
 static func _compact_uv_version_text(uv_version: String) -> String:

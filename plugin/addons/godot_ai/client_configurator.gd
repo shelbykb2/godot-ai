@@ -736,19 +736,40 @@ static func _cached_venv_python() -> String:
 	return cached
 
 
+## Absolute path to `res://addons/godot_ai`, resolving Windows junctions /
+## POSIX symlinks via `DirAccess.read_link`. Unresolved globalize_path only
+## walks the *logical* project path (e.g. MyGame/addons/godot_ai → MyGame)
+## and never reaches a fork checkout's `.venv` (…/godot-ai/.venv).
+static func resolve_addons_realpath() -> String:
+	var addons_path := ProjectSettings.globalize_path("res://addons/godot_ai").rstrip("/").rstrip("\\")
+	if addons_path.is_empty():
+		return ""
+	var parent := addons_path.get_base_dir()
+	var dir := DirAccess.open(parent)
+	if dir != null and dir.is_link(addons_path):
+		var target := dir.read_link(addons_path)
+		if not target.is_empty():
+			if target.is_relative_path():
+				target = parent.path_join(target).simplify_path()
+			return target.rstrip("/").rstrip("\\")
+	return addons_path
+
+
 static func _find_venv_python() -> String:
+	## Optional hard override (junction edge cases / CI).
+	var env_py := McpPathTemplate.env_lookup("GODOT_AI_VENV_PYTHON").strip_edges()
+	if not env_py.is_empty() and FileAccess.file_exists(env_py):
+		return env_py
 	## 1) Walk up from the open project (classic monorepo / test_project layout).
 	var from_project := _find_venv_python_in(
-		ProjectSettings.globalize_path("res://").rstrip("/")
+		ProjectSettings.globalize_path("res://").rstrip("/").rstrip("\\")
 	)
 	if not from_project.is_empty():
 		return from_project
-	## 2) Junctioned/symlinked plugin into a game project (e.g. Lumina →
-	##    godot-ai/plugin/addons/godot_ai). Walk up from the *real* addon path
-	##    so we find the fork checkout's `.venv` + `src/godot_ai` (depth 4+).
-	var addons_abs := ProjectSettings.globalize_path("res://addons/godot_ai").rstrip("/")
-	if not addons_abs.is_empty():
-		var from_addons := _find_venv_python_in(addons_abs)
+	## 2) Junctioned plugin: resolve reparse target, then walk up to fork root.
+	var addons_real := resolve_addons_realpath()
+	if not addons_real.is_empty():
+		var from_addons := _find_venv_python_in(addons_real)
 		if not from_addons.is_empty():
 			return from_addons
 	return ""
