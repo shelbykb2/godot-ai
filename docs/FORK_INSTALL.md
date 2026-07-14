@@ -5,6 +5,24 @@ This fork (`shelbykb2/godot-ai`) tracks [hi-godot/godot-ai](https://github.com/h
 1. **Grok Build** client descriptor (dock **Configure** writes `~/.grok/config.toml`)
 2. **`grok_manage`** workflow tools (modeling guidance, asset pipeline scan, screenshot verification, visual QA, install hints)
 
+## Local fork version (pre-upstream PR)
+
+| Field | Value |
+|-------|--------|
+| Plugin / package version | **`3.0.2+grok.1`** |
+| Description | Godot AI *(shelbykb2 fork + Grok)* |
+
+Use this while running the fork **before** any PR to hi-godot is merged. Do **not** treat it as an official 3.0.3 release.
+
+- **Self-update:** with a directory junction / symlink install, Update is blocked. Do not install stock GitHub 3.0.2 over the fork.
+- **Python server:** `grok_manage` only exists if the process on port 8000 is this fork’s code:
+
+```powershell
+cd C:\Users\bellf\OneDrive\Documents\godot-ai
+.venv\Scripts\Activate.ps1
+python -m godot_ai --transport streamable-http --port 8000 --reload
+```
+
 ## Grok MCP entry
 
 ```toml
