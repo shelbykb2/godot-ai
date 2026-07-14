@@ -28,7 +28,12 @@ Assume:
 ```powershell
 $FORK = "C:\Users\bellf\OneDrive\Documents\godot-ai\plugin\addons\godot_ai"
 $LUMINA = "C:\Users\bellf\OneDrive\Documents\lumina\addons\godot_ai"
-Copy-Item -Recurse -Force $LUMINA "$LUMINA.bak-$(Get-Date -Format yyyyMMddHHmmss)"
+# IMPORTANT: keep backups *outside* addons/ — Godot loads every folder under
+# addons/ that contains plugin.cfg, so a bak copy will double-enable the plugin
+# and spam errors like get_version_check on Nil.
+$BAK_ROOT = "C:\Users\bellf\OneDrive\Documents\lumina\_plugin_backups"
+New-Item -ItemType Directory -Force -Path $BAK_ROOT | Out-Null
+Copy-Item -Recurse -Force $LUMINA "$BAK_ROOT\godot_ai.bak-$(Get-Date -Format yyyyMMddHHmmss)"
 Remove-Item -Recurse -Force $LUMINA
 Copy-Item -Recurse -Force $FORK $LUMINA
 ```
