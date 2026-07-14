@@ -15,7 +15,14 @@ This fork (`shelbykb2/godot-ai`) tracks [hi-godot/godot-ai](https://github.com/h
 Use this while running the fork **before** any PR to hi-godot is merged. Do **not** treat it as an official 3.0.3 release.
 
 - **Self-update:** with a directory junction / symlink install, Update is blocked. Do not install stock GitHub 3.0.2 over the fork.
-- **Python server:** `grok_manage` only exists if the process on port 8000 is this fork’s code:
+- **Python server:** with a **junctioned** plugin, the plugin walks up from
+  `addons/godot_ai` to this repo and prefers `.venv` (`MCP | using dev venv`).
+  That is required for `grok_manage`. If you still see
+  `uvx ... godot-ai==3.0.2+grok.1`, the fork venv was not found — run setup-dev
+  and confirm `.venv\Scripts\python.exe` exists. Local tags are stripped for
+  any uvx fallback (`3.0.2+grok.1` → PyPI `3.0.2`, **without** Grok tools).
+
+Manual server (optional, `--reload`):
 
 ```powershell
 cd C:\Users\bellf\OneDrive\Documents\godot-ai

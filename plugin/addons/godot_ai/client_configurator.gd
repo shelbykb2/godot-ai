@@ -471,6 +471,17 @@ static func get_plugin_version() -> String:
 	return "0.0.1"
 
 
+## Strip local build metadata for PyPI pins: `3.0.2+grok.1` → `3.0.2`.
+static func _pypi_pin_version(version: String) -> String:
+	var v := version.strip_edges()
+	var plus := v.find("+")
+	if plus >= 0:
+		v = v.substr(0, plus)
+	## Also strip pre-release style local tags after a second hyphen segment
+	## that is clearly not a numeric patch (keep 3.0.2 as-is).
+	return v
+
+
 ## Override for the dev-vs-user heuristic. Accepted values:
 ##   "dev"   — force dev-checkout mode (skip update check + self-install)
 ##   "user"  — force user-install mode (run update check, allow self-install)
@@ -564,6 +575,10 @@ static func get_server_command(refresh: bool = false) -> Array[String]:
 	var uvx := find_uvx()
 	if not uvx.is_empty():
 		var version := get_plugin_version()
+		## Local fork tags (e.g. 3.0.2+grok.1) are not on PyPI. Pin uvx to the
+		## public base version so the server still boots; Grok extras require
+		## the dev_venv tier above (junction → fork .venv).
+		var pypi_version := _pypi_pin_version(version)
 		## Pin to the EXACT plugin version rather than `~=<minor>`. Under the
 		## tilde form, uvx was happy to reuse a cached tool env that matched
 		## the minor constraint — so an install that first spawned 1.2.0 kept
@@ -572,11 +587,17 @@ static func get_server_command(refresh: bool = false) -> Array[String]:
 		## otherwise uvx installs the exact version fresh. Keeps plugin and
 		## server version in lockstep without needing `--refresh-package` on
 		## every spawn. See issue #133.
-		print("MCP | using uvx (godot-ai==%s)%s" % [version, " [refresh]" if refresh else ""])
+		if pypi_version != version:
+			print(
+				"MCP | using uvx (godot-ai==%s; local plugin %s not on PyPI)%s"
+				% [pypi_version, version, " [refresh]" if refresh else ""]
+			)
+		else:
+			print("MCP | using uvx (godot-ai==%s)%s" % [pypi_version, " [refresh]" if refresh else ""])
 		var cmd: Array[String] = [uvx]
 		if refresh:
 			cmd.append("--refresh")
-		cmd.append_array(["--from", "godot-ai==%s" % version, "godot-ai"])
+		cmd.append_array(["--from", "godot-ai==%s" % pypi_version, "godot-ai"])
 		return cmd
 
 	var system_cmd := _find_system_install()
@@ -716,7 +737,21 @@ static func _cached_venv_python() -> String:
 
 
 static func _find_venv_python() -> String:
-	return _find_venv_python_in(ProjectSettings.globalize_path("res://").rstrip("/"))
+	## 1) Walk up from the open project (classic monorepo / test_project layout).
+	var from_project := _find_venv_python_in(
+		ProjectSettings.globalize_path("res://").rstrip("/")
+	)
+	if not from_project.is_empty():
+		return from_project
+	## 2) Junctioned/symlinked plugin into a game project (e.g. Lumina →
+	##    godot-ai/plugin/addons/godot_ai). Walk up from the *real* addon path
+	##    so we find the fork checkout's `.venv` + `src/godot_ai` (depth 4+).
+	var addons_abs := ProjectSettings.globalize_path("res://addons/godot_ai").rstrip("/")
+	if not addons_abs.is_empty():
+		var from_addons := _find_venv_python_in(addons_abs)
+		if not from_addons.is_empty():
+			return from_addons
+	return ""
 
 
 ## Pure path-based lookup so tests can drive it with a scratch dir instead of
@@ -729,15 +764,17 @@ static func _find_venv_python() -> String:
 ## the uvx tier, so the dev_venv misidentification has no escape hatch — the
 ## detection has to be right the first time.
 static func _find_venv_python_in(start_dir: String) -> String:
-	var dir := start_dir.rstrip("/")
+	var dir := start_dir.rstrip("/").rstrip("\\")
 	var python_name := "python" if OS.get_name() != "Windows" else "python.exe"
 	var venv_dir := ".venv/bin/" if OS.get_name() != "Windows" else ".venv/Scripts/"
-	for i in 5:
+	## 8 hops: game project roots are shallow; junctioned plugins sit at
+	## <repo>/plugin/addons/godot_ai (4) and nested worktrees may be deeper.
+	for i in 8:
 		var venv_path := dir.path_join(venv_dir + python_name)
 		if FileAccess.file_exists(venv_path) and DirAccess.dir_exists_absolute(dir.path_join("src/godot_ai")):
 			return venv_path
 		var parent := dir.get_base_dir()
-		if parent == dir:
+		if parent == dir or parent.is_empty():
 			break
 		dir = parent
 	return ""
