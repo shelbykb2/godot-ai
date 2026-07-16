@@ -6,6 +6,10 @@ import asyncio
 import base64
 import json
 import logging
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 from fastmcp.tools.base import Image as McpImage
 from mcp.types import TextContent
@@ -25,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 SCREENSHOT_TIMEOUT_SEC = 15.0
 GAME_SCREENSHOT_TIMEOUT_SEC = 35.0
+## Default max longest-edge for MCP ImageContent (avoids Grok/agent payload truncation).
+DEFAULT_INLINE_MAX_RESOLUTION = 400
+## Fork default: always write PNG to disk so agents can read_file without base64.
+DEFAULT_AUTO_SAVE = True
 
 ## Brief delay between handing the structured pre-flight ack back to
 ## FastMCP and firing `reload_plugin` over the WebSocket on the
@@ -69,6 +77,86 @@ async def editor_selection_get(runtime: DirectRuntime) -> dict:
     return await runtime.send_command("get_selection")
 
 
+def _project_root_from_runtime(runtime: DirectRuntime) -> Path | None:
+    try:
+        session = runtime.get_active_session()
+    except Exception:  # noqa: BLE001
+        session = None
+    if session is None or not getattr(session, "project_path", None):
+        return None
+    path = Path(session.project_path)
+    return path if path.is_dir() else path.parent if path.exists() else None
+
+
+def _resolve_save_path(
+    runtime: DirectRuntime,
+    save_path: str,
+    source: str,
+    *,
+    label: str = "",
+) -> tuple[Path | None, str | None, str | None]:
+    """Return (absolute_path, res_path_or_none, error_or_none)."""
+    root = _project_root_from_runtime(runtime)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    safe_src = re.sub(r"[^a-z0-9_]+", "_", (source or "shot").lower()).strip("_") or "shot"
+    safe_label = re.sub(r"[^a-z0-9_]+", "_", (label or "").lower()).strip("_")
+    default_name = f"{safe_src}_{safe_label + '_' if safe_label else ''}{stamp}.png"
+
+    if not save_path:
+        if root is None:
+            # Fall back to temp under cwd
+            out = Path.cwd() / "mcp_captures" / default_name
+            return out, None, None
+        out = root / "docs" / "mcp_captures" / default_name
+        res = f"res://docs/mcp_captures/{default_name}"
+        return out, res, None
+
+    raw = save_path.strip()
+    if raw.startswith("res://"):
+        if root is None:
+            return None, None, "Cannot resolve res:// path: no active project_path on session"
+        rel = raw[len("res://") :].lstrip("/\\")
+        out = (root / rel).resolve()
+        try:
+            out.relative_to(root.resolve())
+        except ValueError:
+            return None, None, "save_path escapes project root"
+        return out, raw if raw.endswith(".png") else raw + ("" if raw.endswith(".png") else ""), None
+
+    out = Path(raw).expanduser()
+    if not out.is_absolute():
+        if root is not None:
+            out = (root / out).resolve()
+        else:
+            out = out.resolve()
+    else:
+        out = out.resolve()
+    if root is not None:
+        try:
+            out.relative_to(root.resolve())
+        except ValueError:
+            # Allow absolute paths outside project only if explicitly absolute user path
+            # still ok for agent temp dirs
+            pass
+    res: str | None = None
+    if root is not None:
+        try:
+            rel = out.relative_to(root.resolve())
+            res = "res://" + str(rel).replace("\\", "/")
+        except ValueError:
+            res = None
+    return out, res, None
+
+
+def _write_png(path: Path, image_bytes: bytes) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(image_bytes)
+    return {
+        "saved_path": str(path),
+        "byte_size": len(image_bytes),
+    }
+
+
 async def editor_screenshot(
     runtime: DirectRuntime,
     source: str = "viewport",
@@ -79,10 +167,22 @@ async def editor_screenshot(
     elevation: float | None = None,
     azimuth: float | None = None,
     fov: float | None = None,
+    save_path: str = "",
+    auto_save: bool = DEFAULT_AUTO_SAVE,
+    inline_max_resolution: int = DEFAULT_INLINE_MAX_RESOLUTION,
 ) -> dict | list:
+    """Capture screenshot; optionally save PNG to disk (agent-safe, no truncation).
+
+    When ``auto_save`` is true (fork default) or ``save_path`` is set, writes a
+    full-quality PNG and returns ``saved_path`` in metadata so agents can
+    ``read_file`` the image. MCP ImageContent is only attached when
+    ``include_image`` is true *and* resolution is within ``inline_max_resolution``
+    (or a smaller inline recapture is performed).
+    """
+    capture_res = max_resolution if max_resolution > 0 else 0
     params: dict = {"source": source}
-    if max_resolution > 0:
-        params["max_resolution"] = max_resolution
+    if capture_res > 0:
+        params["max_resolution"] = capture_res
     if view_target:
         params["view_target"] = view_target
     if coverage:
@@ -101,10 +201,13 @@ async def editor_screenshot(
         timeout=timeout,
     )
 
+    should_save = bool(save_path.strip()) or auto_save
+
     # --- Coverage response: multiple images ---
     if result.get("coverage") and "images" in result:
         images_meta = []
-        for img in result["images"]:
+        saved_paths: list[str] = []
+        for i, img in enumerate(result["images"]):
             meta_entry = {
                 "label": img["label"],
                 "elevation": img["elevation"],
@@ -115,14 +218,37 @@ async def editor_screenshot(
             }
             if img.get("ortho"):
                 meta_entry["ortho"] = True
+            if should_save:
+                image_bytes = base64.b64decode(img.get("image_base64", ""))
+                path, res_p, err = _resolve_save_path(
+                    runtime,
+                    save_path if i == 0 and save_path.strip() else "",
+                    source,
+                    label=str(img.get("label", i)),
+                )
+                if err:
+                    meta_entry["save_error"] = err
+                elif path is not None:
+                    written = _write_png(path, image_bytes)
+                    meta_entry.update(written)
+                    if res_p:
+                        meta_entry["saved_path_res"] = res_p if res_p.endswith(".png") else res_p
+                    saved_paths.append(written["saved_path"])
             images_meta.append(meta_entry)
-        metadata = {
+        metadata: dict[str, Any] = {
             "source": result["source"],
             "view_target": view_target,
             "coverage": True,
             "image_count": len(result["images"]),
             "images": images_meta,
+            "saved_paths": saved_paths,
+            "agent_hint": (
+                "Use read_file on saved_path entries for full-quality visual review "
+                "(avoids MCP image truncation)."
+            ),
         }
+        if saved_paths:
+            metadata["saved_path"] = saved_paths[0]
         if "view_target_count" in result:
             metadata["view_target_count"] = result["view_target_count"]
         if "view_target_not_found" in result:
@@ -131,7 +257,11 @@ async def editor_screenshot(
             if aabb_key in result:
                 metadata[aabb_key] = result[aabb_key]
 
-        if not include_image:
+        attach_inline = include_image and (
+            capture_res <= 0 or capture_res <= inline_max_resolution
+        )
+        metadata["inline_included"] = attach_inline
+        if not attach_inline:
             return metadata
 
         blocks: list = [TextContent(type="text", text=json.dumps(metadata))]
@@ -167,12 +297,47 @@ async def editor_screenshot(
         if key in result:
             metadata[key] = result[key]
 
-    if not include_image:
-        return metadata
-
     image_b64 = result.get("image_base64", "")
-    image_bytes = base64.b64decode(image_b64)
+    image_bytes = base64.b64decode(image_b64) if image_b64 else b""
     fmt = result.get("format", "png")
+
+    if should_save and image_bytes:
+        path, res_p, err = _resolve_save_path(runtime, save_path, source)
+        if err:
+            metadata["save_error"] = err
+        elif path is not None:
+            written = _write_png(path, image_bytes)
+            metadata.update(written)
+            root = _project_root_from_runtime(runtime)
+            if root is not None:
+                try:
+                    metadata["saved_path_res"] = "res://" + str(
+                        path.relative_to(root.resolve())
+                    ).replace("\\", "/")
+                except ValueError:
+                    if res_p:
+                        metadata["saved_path_res"] = res_p
+            elif res_p:
+                metadata["saved_path_res"] = res_p
+            metadata["agent_hint"] = (
+                "Use read_file on saved_path for full-quality visual review "
+                "(avoids MCP image truncation)."
+            )
+
+    attach_inline = include_image and image_bytes and (
+        capture_res <= 0 or capture_res <= inline_max_resolution
+    )
+    # If user asked for a large include_image, save is enough; skip huge inline
+    if include_image and not attach_inline and capture_res > inline_max_resolution:
+        metadata["inline_skipped"] = True
+        metadata["inline_skip_reason"] = (
+            f"max_resolution {capture_res} > inline_max_resolution "
+            f"{inline_max_resolution}; use saved_path + read_file"
+        )
+    metadata["inline_included"] = bool(attach_inline)
+
+    if not attach_inline:
+        return metadata
 
     return [
         TextContent(type="text", text=json.dumps(metadata)),

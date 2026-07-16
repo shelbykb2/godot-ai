@@ -179,6 +179,9 @@ def register_editor_tools(mcp: FastMCP, *, include_non_core: bool = True) -> Non
         elevation: float | None = None,
         azimuth: float | None = None,
         fov: float | None = None,
+        save_path: str = "",
+        auto_save: bool = True,
+        inline_max_resolution: int = 400,
         session_id: str = "",
     ):
         """Capture a screenshot of the Godot editor viewport or running game.
@@ -202,20 +205,26 @@ def register_editor_tools(mcp: FastMCP, *, include_non_core: bool = True) -> Non
           when the scene contains no Camera3D at all.
         - "game": running game's framebuffer (only when project is running).
 
-        ``include_image=True`` (default) returns an MCP ImageContent block.
-        ``view_target`` (comma-separated Node3D paths) reframes editor camera;
-        AABB metadata always returned. ``coverage=True`` with view_target
-        captures perspective + orthographic top-down references.
+        Disk save (fork / agent-safe): ``auto_save=True`` (default) writes a PNG
+        under ``res://docs/mcp_captures/`` (or ``save_path``). Response metadata
+        includes ``saved_path`` — agents should ``read_file`` that path instead of
+        relying on large MCP ImageContent (which truncates).
+
+        ``include_image=True`` only attaches ImageContent when resolution is
+        within ``inline_max_resolution`` (default 400).
 
         Args:
             source: "viewport" | "viewport_2d" | "cinematic" | "game". Default "viewport".
             max_resolution: Longest-edge resolution. Default 640. 0 = full res.
-            include_image: Return image data. Default True.
+            include_image: Prefer returning image data when small enough. Default True.
             view_target: Node3D scene path(s) to frame, comma-separated.
             coverage: With view_target, capture two reference shots + AABB.
             elevation: Camera elevation in degrees (0=level, 90=overhead).
             azimuth: Camera azimuth in degrees (0=front, 90=right).
             fov: Camera FOV in degrees. Tight 20-30 = zoom; 60-75 = context.
+            save_path: Absolute or res:// path for PNG (optional).
+            auto_save: Write PNG to disk even without save_path. Default True.
+            inline_max_resolution: Max edge for MCP ImageContent. Default 400.
             session_id: Optional Godot session to target. Empty = active session.
         """
         runtime = DirectRuntime.from_context(ctx, session_id=session_id or None)
@@ -229,6 +238,9 @@ def register_editor_tools(mcp: FastMCP, *, include_non_core: bool = True) -> Non
             elevation=elevation,
             azimuth=azimuth,
             fov=fov,
+            save_path=save_path,
+            auto_save=auto_save,
+            inline_max_resolution=inline_max_resolution,
         )
 
     @mcp.tool(meta=DEFER_META)

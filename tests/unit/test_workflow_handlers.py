@@ -98,6 +98,8 @@ async def test_screenshot_verify_checklist(monkeypatch: pytest.MonkeyPatch) -> N
             "original_width": 1280,
             "original_height": 720,
             "format": "png",
+            "saved_path": "C:/tmp/shot.png",
+            "byte_size": 12,
         }
 
     monkeypatch.setattr(
@@ -110,8 +112,58 @@ async def test_screenshot_verify_checklist(monkeypatch: pytest.MonkeyPatch) -> N
         checklist=["Item A", "Item B"],
     )
     assert out["capture"]["width"] == 640
+    assert out["saved_path"] == "C:/tmp/shot.png"
+    assert "saved_path=" in out["agent_instructions"]
     assert len(out["checklist_results"]) == 2
     assert out["checklist_results"][0]["status"] == "pending_agent_review"
+
+
+@pytest.mark.asyncio
+async def test_screenshot_to_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_shot(*_a: Any, **kwargs: Any) -> dict:
+        assert kwargs.get("include_image") is False
+        assert kwargs.get("auto_save") is True
+        return {
+            "source": "game",
+            "width": 800,
+            "height": 450,
+            "saved_path": "C:/proj/docs/mcp_captures/game.png",
+            "saved_path_res": "res://docs/mcp_captures/game.png",
+            "byte_size": 99,
+        }
+
+    monkeypatch.setattr("godot_ai.handlers.editor.editor_screenshot", fake_shot)
+    out = await workflow_handlers.workflow_screenshot_to_file(
+        _FakeRuntime(),  # type: ignore[arg-type]
+        source="game",
+    )
+    assert out["ok"] is True
+    assert out["saved_path"].endswith("game.png")
+
+
+@pytest.mark.asyncio
+async def test_visual_capture_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_state(_runtime: Any) -> dict:
+        return {"is_playing": True, "helper_live": True, "game_status": {"helper_live": True}}
+
+    async def fake_to_file(_runtime: Any, **kwargs: Any) -> dict:
+        return {
+            "ok": True,
+            "saved_path": f"C:/shots/{kwargs.get('source', 'x')}.png",
+            "source": kwargs.get("source"),
+        }
+
+    monkeypatch.setattr("godot_ai.handlers.editor.editor_state", fake_state)
+    monkeypatch.setattr(
+        "godot_ai.handlers.workflow.workflow_screenshot_to_file",
+        fake_to_file,
+    )
+    out = await workflow_handlers.workflow_visual_capture_set(
+        _FakeRuntime(),  # type: ignore[arg-type]
+        shots=[{"source": "game", "label": "a"}, {"source": "viewport", "label": "b"}],
+    )
+    assert out["count"] == 2
+    assert len(out["saved_paths"]) == 2
 
 
 @pytest.mark.asyncio

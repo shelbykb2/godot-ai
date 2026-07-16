@@ -141,6 +141,11 @@ async def workflow_modeling_guidance(
         "Exported .glb opens cleanly in Godot without missing buffers",
         "Materials not pure white/black; roughness set intentionally",
     ]
+    guide["screenshot_loop"] = [
+        "project_run → workflow_manage screenshot_to_file (source=game)",
+        "read_file(saved_path) for full-quality pixels (avoids MCP truncation)",
+        "Fix materials/placement → reimport → capture again",
+    ]
     return guide
 
 
@@ -212,8 +217,16 @@ async def workflow_asset_pipeline(
         )
 
     recommendations.append(
-        "After asset changes: EditorFileSystem scan / reimport; smoke with project_run + screenshot"
+        "After asset changes: EditorFileSystem scan / reimport; smoke with "
+        "project_run + workflow_manage screenshot_to_file (read_file saved_path)"
     )
+    recommendations.append(
+        "Avoid pure-white albedo muls on terrain/props; keep mid-range color so PBR maps read"
+    )
+    if found["glb_count"] > 0:
+        recommendations.append(
+            "Trees/props: ensure Trunk*/Canopy* mesh names for material classifiers"
+        )
 
     return {
         "root": root,
@@ -233,12 +246,14 @@ async def workflow_screenshot_verify(
     elevation: float | None = None,
     azimuth: float | None = None,
     fov: float | None = None,
+    save_path: str = "",
+    auto_save: bool = True,
 ) -> dict:
     """Capture a screenshot and attach a structured visual checklist.
 
-    Defaults to ``include_image=False`` so tool-capped clients get compact
-    JSON metadata; set ``include_image=True`` when the agent must see pixels.
-    Checklist items are returned as *pending agent review* (not auto-scored).
+    Defaults to ``include_image=False`` + ``auto_save=True`` so agents get
+    ``saved_path`` on disk (read_file) without truncated MCP ImageContent.
+    Checklist items are *pending agent review* (not auto-scored).
     """
     items = list(checklist) if checklist else list(_DEFAULT_CHECKLIST)
     capture = await editor_handlers.editor_screenshot(
@@ -250,6 +265,9 @@ async def workflow_screenshot_verify(
         elevation=elevation,
         azimuth=azimuth,
         fov=fov,
+        save_path=save_path,
+        auto_save=auto_save,
+        inline_max_resolution=400,
     )
 
     # When include_image=True the editor handler may return a content-block list.
@@ -268,6 +286,10 @@ async def workflow_screenshot_verify(
     else:
         capture_out = capture
 
+    saved = ""
+    if isinstance(capture_out, dict):
+        saved = str(capture_out.get("saved_path") or "")
+
     checklist_results = [
         {
             "item": item,
@@ -277,15 +299,146 @@ async def workflow_screenshot_verify(
         for item in items
     ]
 
+    instructions = (
+        "Prefer read_file(saved_path) for full-quality pixels (no MCP truncation). "
+        "Update each checklist item to pass/fail with a one-line reason. "
+        "For game-view QA, prefer source=game after project_run when helper_live."
+    )
+    if saved:
+        instructions = f"saved_path={saved}. " + instructions
+
     return {
         "capture": capture_out,
         "source": source,
+        "saved_path": saved or None,
         "checklist_results": checklist_results,
-        "agent_instructions": (
-            "Visually inspect the capture (or re-call with include_image=true). "
-            "Update each checklist item to pass/fail with a one-line reason. "
-            "For game-view QA, prefer source=game after project_run when helper_live."
+        "agent_instructions": instructions,
+    }
+
+
+async def workflow_screenshot_to_file(
+    runtime: DirectRuntime,
+    source: str = "game",
+    max_resolution: int = 800,
+    save_path: str = "",
+    view_target: str = "",
+    elevation: float | None = None,
+    azimuth: float | None = None,
+    fov: float | None = None,
+) -> dict:
+    """Capture a screenshot to disk only — never requires inline ImageContent.
+
+    Returns saved_path for agent read_file. Preferred entry for Grok Build
+    visual loops when base64 truncation is a problem.
+    """
+    capture = await editor_handlers.editor_screenshot(
+        runtime,
+        source=source,
+        max_resolution=max_resolution,
+        include_image=False,
+        view_target=view_target,
+        elevation=elevation,
+        azimuth=azimuth,
+        fov=fov,
+        save_path=save_path,
+        auto_save=True,
+    )
+    meta = capture if isinstance(capture, dict) else {"raw": str(capture)[:200]}
+    return {
+        "ok": bool(meta.get("saved_path")),
+        "saved_path": meta.get("saved_path"),
+        "saved_path_res": meta.get("saved_path_res"),
+        "byte_size": meta.get("byte_size"),
+        "source": meta.get("source", source),
+        "width": meta.get("width"),
+        "height": meta.get("height"),
+        "save_error": meta.get("save_error"),
+        "agent_hint": meta.get(
+            "agent_hint",
+            "Use read_file on saved_path for visual review.",
         ),
+        "capture": meta,
+    }
+
+
+async def workflow_visual_capture_set(
+    runtime: DirectRuntime,
+    shots: list[dict[str, Any]] | None = None,
+    max_resolution: int = 720,
+    run_if_needed: bool = False,
+) -> dict:
+    """Capture multiple labeled screenshots to disk.
+
+    ``shots`` items: {source?, view_target?, elevation?, azimuth?, fov?, label?, save_path?}
+    Defaults to one game shot when shots is null.
+    """
+    if not shots:
+        shots = [{"source": "game", "label": "main"}]
+
+    state = await editor_handlers.editor_state(runtime)
+    game_status = state.get("game_status") or {}
+    helper_live = bool(state.get("helper_live") or game_status.get("helper_live"))
+    is_playing = bool(state.get("is_playing"))
+    ran = False
+    if run_if_needed and not is_playing:
+        await project_handlers.project_run(runtime, mode="main", autosave=True)
+        ran = True
+        for _ in range(20):
+            await asyncio.sleep(0.5)
+            state = await editor_handlers.editor_state(runtime)
+            game_status = state.get("game_status") or {}
+            helper_live = bool(state.get("helper_live") or game_status.get("helper_live"))
+            is_playing = bool(state.get("is_playing"))
+            if helper_live or not is_playing:
+                break
+
+    results: list[dict[str, Any]] = []
+    for i, spec in enumerate(shots):
+        src = str(spec.get("source") or "viewport").strip().lower()
+        if src == "game" and not helper_live:
+            results.append(
+                {
+                    "index": i,
+                    "label": spec.get("label", f"shot_{i}"),
+                    "skipped": True,
+                    "reason": "Game helper not live",
+                }
+            )
+            continue
+        try:
+            out = await workflow_screenshot_to_file(
+                runtime,
+                source=src,
+                max_resolution=max_resolution,
+                save_path=str(spec.get("save_path") or ""),
+                view_target=str(spec.get("view_target") or ""),
+                elevation=spec.get("elevation"),
+                azimuth=spec.get("azimuth"),
+                fov=spec.get("fov"),
+            )
+            out["index"] = i
+            out["label"] = spec.get("label", f"shot_{i}")
+            out["skipped"] = False
+            results.append(out)
+        except Exception as exc:  # noqa: BLE001
+            results.append(
+                {
+                    "index": i,
+                    "label": spec.get("label", f"shot_{i}"),
+                    "skipped": True,
+                    "reason": str(exc),
+                }
+            )
+
+    paths = [r["saved_path"] for r in results if r.get("saved_path")]
+    return {
+        "ran_project": ran,
+        "helper_live": helper_live,
+        "is_playing": is_playing,
+        "shots": results,
+        "saved_paths": paths,
+        "count": len(paths),
+        "agent_hint": "Call read_file on each saved_path for batch visual review.",
     }
 
 
@@ -295,8 +448,9 @@ async def workflow_visual_qa(
     run_if_needed: bool = False,
     max_resolution: int = 640,
     include_image: bool = False,
+    auto_save: bool = True,
 ) -> dict:
-    """Multi-shot visual QA: optional play, then screenshots per source."""
+    """Multi-shot visual QA: optional play, then screenshots per source (disk paths)."""
     sources = sources or ["viewport"]
     state = await editor_handlers.editor_state(runtime)
     game_status = state.get("game_status") or {}
@@ -335,20 +489,29 @@ async def workflow_visual_qa(
                 source=src_norm,
                 max_resolution=max_resolution,
                 include_image=include_image,
+                auto_save=auto_save,
             )
             shots.append({"source": src_norm, "skipped": False, "result": result})
         except Exception as exc:  # noqa: BLE001 — surface per-shot failures
             shots.append({"source": src_norm, "skipped": True, "reason": str(exc)})
 
+    saved_paths = [
+        s["result"].get("saved_path")
+        for s in shots
+        if not s.get("skipped") and isinstance(s.get("result"), dict) and s["result"].get("saved_path")
+    ]
     return {
         "ran_project": ran,
         "is_playing": is_playing,
         "helper_live": helper_live,
         "shots": shots,
+        "saved_paths": saved_paths,
         "summary": (
             f"{sum(1 for s in shots if not s.get('skipped'))} shot(s) captured; "
-            f"{sum(1 for s in shots if s.get('skipped'))} skipped"
+            f"{sum(1 for s in shots if s.get('skipped'))} skipped; "
+            f"{len(saved_paths)} saved to disk"
         ),
+        "agent_hint": "read_file each saved_paths entry for visual QA.",
     }
 
 
