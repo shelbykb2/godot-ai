@@ -26,7 +26,25 @@ Prefer **small, generic PRs** to hi-godot. Do **not** send this whole branch tip
 | Version `3.0.2+grok.*` | **No** (local only) |
 | This FORK_INSTALL doc | **No** |
 
-Suggested stack: nil-guard → junction/pin → Grok client → workflow_manage.
+Suggested stack (opened against hi-godot/main):
+
+| Order | PR | Branch |
+|-------|-----|--------|
+| A | https://github.com/hi-godot/godot-ai/pull/751 | `pr/nil-lifecycle-guard` |
+| B | https://github.com/hi-godot/godot-ai/pull/752 | `pr/junction-venv-pin` |
+| C | https://github.com/hi-godot/godot-ai/pull/753 | `pr/grok-client` |
+| D | https://github.com/hi-godot/godot-ai/pull/754 | `pr/workflow-manage` |
+
+### CONTRIBUTING checklist applied before open
+
+See [docs/CONTRIBUTING.md](CONTRIBUTING.md) + [AGENTS.md](../AGENTS.md):
+
+- Branched from `upstream/main` (not a fat fork tip)
+- No `+grok` version or `FORK_INSTALL.md` in upstream PR branches
+- Tests for new behavior (Python + Godot-side where the boundary is crossed)
+- `ruff check src/ tests/` and full `pytest -v` green on the integration branch
+- Stage only intentional paths (no drive-by reformat of unrelated files)
+- PR bodies include Motivation / Change / Tests
 
 ## Local fork version
 
