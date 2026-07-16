@@ -10,7 +10,7 @@ local development plus contributions staged as upstream PRs.
 2. **`workflow_manage`** agent helpers (modeling, asset pipeline, screenshot/visual QA, install hints)  
    *(formerly experimental `grok_manage` — renamed for upstream generality)*
 3. **Junction-aware** server discovery (`DirAccess.read_link` → fork `.venv`)
-4. **PEP 440 local tags** stripped for uvx pins (`3.0.2+grok.2` → `3.0.2`)
+4. **PEP 440 local tags** stripped for uvx pins (`3.0.2+grok.3` → `3.0.2`)
 5. Nil-lifecycle guard during dual-plugin reload races
 
 ## Upstream PR policy
@@ -50,7 +50,7 @@ See [docs/CONTRIBUTING.md](CONTRIBUTING.md) + [AGENTS.md](../AGENTS.md):
 
 | Field | Value |
 |-------|--------|
-| Plugin / package version | **`3.0.2+grok.2`** |
+| Plugin / package version | **`3.0.2+grok.3`** |
 | Description | Godot AI *(shelbykb2 fork + Grok)* |
 
 ## Paths (example machine)
@@ -85,7 +85,7 @@ if ($item -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) 
 cmd /c mklink /J "$GAME" "$FORK"
 ```
 
-**Check:** `dir …\addons` shows `<JUNCTION> godot_ai`; `plugin.cfg` has `version="3.0.2+grok.2"`.
+**Check:** `dir …\addons` shows `<JUNCTION> godot_ai`; `plugin.cfg` has `version="3.0.2+grok.3"`.
 
 ### Option B — Physical copy
 
@@ -110,13 +110,13 @@ Or: Godot AI dock → **Grok Build** → **Configure**.
 MCP | using dev venv: …\godot-ai\.venv\Scripts\python.exe
 ```
 
-**Not** `using uvx (godot-ai==3.0.2+grok.2)`.
+**Not** `using uvx (godot-ai==3.0.2+grok.3)`.
 
 If uvx still wins: run `setup-dev.ps1`, confirm junction, set `GODOT_AI_VENV_PYTHON`, reload plugin.
 
 ## Verify
 
-1. Plugins: one **Godot AI** at `3.0.2+grok.2`.
+1. Plugins: one **Godot AI** at `3.0.2+grok.3`.
 2. Dock: session connected.
 3. Client list includes **Grok Build**.
 4. Tools: `workflow_manage` ops  
