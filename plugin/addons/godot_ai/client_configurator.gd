@@ -575,9 +575,10 @@ static func get_server_command(refresh: bool = false) -> Array[String]:
 	var uvx := find_uvx()
 	if not uvx.is_empty():
 		var version := get_plugin_version()
-		## Local fork tags (e.g. 3.0.2+grok.1) are not on PyPI. Pin uvx to the
-		## public base version so the server still boots; Grok extras require
-		## the dev_venv tier above (junction → fork .venv).
+		## PEP 440 local build tags (e.g. 3.0.2+local.1) are not on PyPI.
+		## Pin uvx to the public base version so the server still boots;
+		## checkout-local extras need the dev_venv tier above
+		## (symlink/junction → repo .venv).
 		var pypi_version := _pypi_pin_version(version)
 		## Pin to the EXACT plugin version rather than `~=<minor>`. Under the
 		## tilde form, uvx was happy to reuse a cached tool env that matched

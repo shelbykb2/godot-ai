@@ -54,6 +54,30 @@ func test_registry_loads_all_clients() -> void:
 		assert_true(McpClientRegistry.has_id(required), "Missing client: %s" % required)
 
 
+func test_grok_client_toml_descriptor() -> void:
+	var client := McpClientRegistry.get_by_id("grok")
+	assert_true(client != null, "grok client must be registered")
+	assert_eq(client.display_name, "Grok Build")
+	assert_eq(client.config_type, "toml")
+	assert_eq(
+		String(client.path_template.get("unix", "")),
+		"~/.grok/config.toml",
+		"Grok Build config path must be ~/.grok/config.toml"
+	)
+	assert_eq(client.toml_section_path.size(), 2)
+	assert_eq(String(client.toml_section_path[0]), "mcp_servers")
+	assert_eq(String(client.toml_section_path[1]), "godot-ai")
+
+
+func test_pypi_pin_strips_local_build_metadata() -> void:
+	## PEP 440 local version tags must not be sent to uvx/PyPI.
+	assert_eq(McpClientConfigurator._pypi_pin_version("3.0.2+grok.2"), "3.0.2")
+	assert_eq(McpClientConfigurator._pypi_pin_version("3.0.2+local.1"), "3.0.2")
+	assert_eq(McpClientConfigurator._pypi_pin_version("3.0.2"), "3.0.2")
+	# Pre-release segments stay intact (only '+' local metadata is stripped).
+	assert_eq(McpClientConfigurator._pypi_pin_version("3.1.0-rc1"), "3.1.0-rc1")
+
+
 func test_registry_ids_are_unique() -> void:
 	var seen := {}
 	for id in McpClientRegistry.ids():

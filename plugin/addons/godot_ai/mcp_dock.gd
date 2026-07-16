@@ -1103,19 +1103,19 @@ static func _crash_body_for_state(state: int, server_status: Dictionary = {}) ->
 			return "Another process is already bound to port %d. Pick a free port or stop the other process." % port
 		ServerStateScript.CRASHED:
 			## Both spawn attempts failed on the uvx tier — stock releases:
-			## PyPI lag. Local forks (version with +tag): almost always the
-			## dev venv was not found (unresolved junction) so uvx tried a
-			## non-existent package pin.
+			## PyPI lag. Local builds (version with +metadata): almost always the
+			## dev venv was not found (unresolved junction/symlink) so uvx tried
+			## a pin that may lack checkout-local extras.
 			if ClientConfigurator.get_server_launch_mode() == "uvx":
 				var version := ClientConfigurator.get_plugin_version()
 				var pin := ClientConfigurator._pypi_pin_version(version)
 				if pin != version:
 					return (
 						"The server exited before the WebSocket handshake. "
-						+ "Local plugin is %s (fork) — uvx would need PyPI godot-ai==%s, which has no Grok extras. "
-						+ "Fix: ensure the fork checkout has `.venv` (run setup-dev.ps1) and addons/godot_ai is a junction into that checkout; "
-						+ "or set env GODOT_AI_VENV_PYTHON to the fork python.exe. Then Reload Plugin. "
-						+ "Log should show 'MCP | using dev venv: ...'."
+						+ "Local plugin version is %s (PEP 440 local build metadata) — uvx pins PyPI godot-ai==%s. "
+						+ "If you need checkout-local server code, ensure addons/godot_ai resolves to your "
+						+ "dev tree (symlink/junction) with a `.venv`, or set GODOT_AI_VENV_PYTHON to that "
+						+ "python.exe, then Reload Plugin. Log should show 'MCP | using dev venv: ...'."
 						% [version, pin]
 					)
 				return (

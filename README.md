@@ -11,8 +11,6 @@
 
 **Connect MCP clients directly to a live Godot editor** via the [Model Context Protocol](https://modelcontextprotocol.io/introduction). Over **120 ops across ~43 MCP tools** ([full list](docs/TOOLS.md)) let AI assistants (Claude Code, Codex, **Grok Build**, Antigravity, Hermes Agent, etc.) build scenes, edit nodes and scripts, wire signals, and configure UI, materials, animations, particles, cameras, and environments.
 
-> **Fork note (shelbykb2):** this checkout may include a **Grok Build** client descriptor and `grok_manage` workflow tools. See [docs/FORK_INSTALL.md](docs/FORK_INSTALL.md) to override a project’s `addons/godot_ai` install.
-
 > 🎉 **Now on the [Godot Asset Library](https://godotengine.org/asset-library/asset/5050) and the [new Godot Asset Store](https://store.godotengine.org/asset/dlight/godot-ai/)** — one-click install from Godot's **AssetLib** tab. You'll still need [uv](https://docs.astral.sh/uv/) for the Python server (see [Quick Start](#quick-start)).
 
 <img src="docs/images/assetlib.png" alt="Godot AI on the Godot Asset Library" width="312">
@@ -127,6 +125,16 @@ claude mcp add --scope user --transport http godot-ai http://127.0.0.1:8000/mcp
 url = "http://127.0.0.1:8000/mcp"
 enabled = true
 ```
+
+**Grok Build** (`~/.grok/config.toml`)
+
+```toml
+[mcp_servers.godot-ai]
+url = "http://127.0.0.1:8000/mcp"
+enabled = true
+```
+
+Or dock → **Clients** → **Grok Build** → **Configure**.
 
 **Antigravity** (`~/.gemini/config/mcp_config.json`)
 

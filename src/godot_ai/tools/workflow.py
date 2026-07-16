@@ -1,15 +1,16 @@
-"""MCP tools for Grok Build workflow helpers (modeling, assets, visual QA)."""
+"""MCP tools for agent workflow helpers (modeling, assets, visual QA)."""
 
 from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from godot_ai.handlers import grok as grok_handlers
+from godot_ai.handlers import workflow as workflow_handlers
 from godot_ai.tools._meta_tool import register_manage_tool
 
 _DESCRIPTION = """\
-Grok Build workflow helpers for Godot: modeling guidance, asset pipeline
-scans, screenshot verification, multi-shot visual QA, and fork install hints.
+Agent workflow helpers for Godot: modeling guidance, asset pipeline scans,
+screenshot verification, multi-shot visual QA, and client install hints
+(including Grok Build MCP config).
 
 Ops:
   • modeling_guidance(style="general_pbr", topic="props")
@@ -27,21 +28,21 @@ Ops:
               include_image=false)
         Optional project_run, then multi-source screenshot_verify shots.
   • install_hints()
-        How to override addons/godot_ai with a fork and wire Grok MCP.
+        How to wire Godot AI into Grok Build and related clients.
 """
 
 
-def register_grok_tools(mcp: FastMCP) -> None:
+def register_workflow_tools(mcp: FastMCP) -> None:
     register_manage_tool(
         mcp,
-        tool_name="grok_manage",
+        tool_name="workflow_manage",
         description=_DESCRIPTION,
         ops={
-            "modeling_guidance": grok_handlers.grok_modeling_guidance,
-            "asset_pipeline": grok_handlers.grok_asset_pipeline,
-            "screenshot_verify": grok_handlers.grok_screenshot_verify,
-            "visual_qa": grok_handlers.grok_visual_qa,
-            "install_hints": grok_handlers.grok_install_hints,
+            "modeling_guidance": workflow_handlers.workflow_modeling_guidance,
+            "asset_pipeline": workflow_handlers.workflow_asset_pipeline,
+            "screenshot_verify": workflow_handlers.workflow_screenshot_verify,
+            "visual_qa": workflow_handlers.workflow_visual_qa,
+            "install_hints": workflow_handlers.workflow_install_hints,
         },
         read_resource_forms={
             # Workflow helpers — no godot:// resource counterparts.

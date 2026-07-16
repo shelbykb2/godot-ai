@@ -1,9 +1,11 @@
-"""Shared handlers for Grok Build workflow tools.
+"""Shared handlers for agent workflow helpers (modeling, assets, visual QA).
 
 These ops are intentionally composition-first: they use existing editor
 commands (filesystem search, screenshots, editor state) rather than new
 plugin WebSocket commands. Pure-guidance ops ignore the runtime connection
 when no Godot session is required.
+
+Exposed via the ``workflow_manage`` MCP rollup (domain id: ``workflow``).
 """
 
 from __future__ import annotations
@@ -16,13 +18,14 @@ from godot_ai.handlers import filesystem as filesystem_handlers
 from godot_ai.handlers import project as project_handlers
 from godot_ai.runtime.direct import DirectRuntime
 
-## Default visual-QA checklist items agents can extend per project.
+## Default visual-QA checklist — project-agnostic; callers may override.
 _DEFAULT_CHECKLIST: tuple[str, ...] = (
-    "No continuous floor between floating islands (if applicable)",
-    "Ground textures readable (not single flat sand color)",
-    "Props/trees sit on terrain (no major floating or sinking)",
+    "Composition readable at play-camera distance",
+    "Materials/textures intentional (not pure white or single flat color)",
+    "Props sit on surfaces (no major floating or sinking)",
     "Lighting not over-blown; emission intentional",
-    "UI readable; no debug clutter covering art",
+    "UI readable; no debug clutter covering important art",
+    "No obvious z-fighting or double geometry on surfaces",
 )
 
 _STYLE_GUIDANCE: dict[str, dict[str, Any]] = {
@@ -64,7 +67,7 @@ _STYLE_GUIDANCE: dict[str, dict[str, Any]] = {
         "materials": [
             "Flat or soft gradients; limited palette (3–5 colors per prop)",
             "Roughness high for rock/bark; mid for painted wood; low for crystals",
-            "Emission only for hero glow states (restore, power, magic)",
+            "Emission only for hero glow states (power, magic, interactables)",
         ],
         "poly_budget": [
             "Trees: ~200–800 tris; buildings: modular pieces under ~1k each",
@@ -78,26 +81,26 @@ _STYLE_GUIDANCE: dict[str, dict[str, Any]] = {
     "stylized_ethereal": {
         "summary": "Dreamy / ethereal stylized look (soft glow, cool rock, mint flora).",
         "silhouette": [
-            "Soft organic islands and lobed tree canopies; avoid photoreal oaks",
-            "Floating forms need clear underside / cliff mass so they read as solid",
+            "Soft organic forms and lobed foliage; avoid photoreal tree noise",
+            "Floating or elevated forms need clear underside mass so they read as solid",
         ],
         "naming": [
-            "Trees: Trunk* / Canopy* (Godot classifiers often key off these substrings)",
-            "Islands: Top / Cliff separation if dual materials",
+            "Trees: Trunk* / Canopy* (classifiers often key off these substrings)",
+            "Split walkable top vs cliff/side materials when both are visible",
         ],
         "materials": [
             "Bark: muted purple-brown, high roughness (~0.85–0.92)",
-            "Leaves: mint/teal, mid roughness; emission ramps with restoration themes",
+            "Leaves: mint/teal, mid roughness; soft emission for magical states",
             "Rock: cool grey-blue, not sandy warm beige",
-            "Dead state: desaturated ash; restored: theme color emission",
+            "Dead/desaturated vs restored theme-color emission when games use restore loops",
         ],
         "poly_budget": [
             "Stylized trees ~300–900 tris with 4–6 canopy lobes + short branches",
-            "Island visuals: cliff skirt separate from walkable top when possible",
+            "Keep cliff skirts separate from walkable tops when dual materials help",
         ],
         "export": [
-            "glTF .glb via headless Blender pipeline when iterating in CI/agents",
-            "Keep origin at base (trees) or island center (islands)",
+            "glTF .glb; headless Blender pipelines work well for agent iteration",
+            "Keep origin at base (characters/props) or logical center (islands/platforms)",
         ],
     },
 }
@@ -110,7 +113,7 @@ def _normalize_style(style: str) -> str:
     return "general_pbr"
 
 
-async def grok_modeling_guidance(
+async def workflow_modeling_guidance(
     runtime: DirectRuntime,
     style: str = "general_pbr",
     topic: str = "props",
@@ -127,8 +130,8 @@ async def grok_modeling_guidance(
     guide["topic"] = topic or "props"
     guide["godot_notes"] = [
         "Godot 4.x Forward+; import .glb via EditorFileSystem",
-        "Prefer runtime material overrides for restore/dead states over many mesh variants",
-        "Name meshes for classification (tree trunk vs canopy, cliff vs top)",
+        "Prefer runtime material overrides for state changes over many mesh variants",
+        "Name meshes for classification (trunk vs canopy, cliff vs top)",
         "Keep collision simpler than render mesh (convex or trimmed trimesh)",
     ]
     guide["checklist"] = [
@@ -141,7 +144,7 @@ async def grok_modeling_guidance(
     return guide
 
 
-async def grok_asset_pipeline(
+async def workflow_asset_pipeline(
     runtime: DirectRuntime,
     path: str = "res://",
     limit: int = 80,
@@ -186,23 +189,26 @@ async def grok_asset_pipeline(
     if found["glb_count"] + found["gltf_count"] == 0:
         missing.append("No .glb/.gltf under scan root")
         recommendations.append(
-            "Add custom props via Blender glTF export or kitbash packs under res://assets/"
+            "Add props via Blender glTF export or kitbash packs under res://assets/"
         )
     if found["blender_path_hits"] == 0:
         recommendations.append(
-            "Optional: tools/blender build scripts help agents regenerate assets headlessly"
+            "Optional: tools/blender (or similar) scripts help agents regenerate assets headlessly"
         )
     if found["pbr_jpg_hits"] == 0:
         recommendations.append(
-            "Consider CC0 PBR maps (albedo/normal/roughness) under res://assets/pbr/"
+            "Consider CC0 PBR maps (albedo/normal/roughness) under "
+            "res://assets/pbr/ when using textured materials"
         )
     if found["terrain3d_hits"] == 0:
         recommendations.append(
-            "Terrain3D addon not detected — mesh heightfields or install Terrain3D for painted tops"
+            "Terrain3D not detected — use mesh heightfields or install "
+            "Terrain3D for painted terrain"
         )
     else:
         recommendations.append(
-            "Terrain3D present — prefer per-island regions / holes for floating archipelagos"
+            "Terrain3D present — prefer discrete regions/holes when the "
+            "world should not be a continuous floor"
         )
 
     recommendations.append(
@@ -217,7 +223,7 @@ async def grok_asset_pipeline(
     }
 
 
-async def grok_screenshot_verify(
+async def workflow_screenshot_verify(
     runtime: DirectRuntime,
     source: str = "viewport",
     max_resolution: int = 800,
@@ -283,7 +289,7 @@ async def grok_screenshot_verify(
     }
 
 
-async def grok_visual_qa(
+async def workflow_visual_qa(
     runtime: DirectRuntime,
     sources: list[str] | None = None,
     run_if_needed: bool = False,
@@ -324,7 +330,7 @@ async def grok_visual_qa(
             )
             continue
         try:
-            result = await grok_screenshot_verify(
+            result = await workflow_screenshot_verify(
                 runtime,
                 source=src_norm,
                 max_resolution=max_resolution,
@@ -346,46 +352,58 @@ async def grok_visual_qa(
     }
 
 
-async def grok_install_hints(runtime: DirectRuntime) -> dict:
-    """Return instructions to install/override godot-ai from a fork."""
+async def workflow_install_hints(runtime: DirectRuntime) -> dict:
+    """Return instructions to wire Godot AI into Grok Build and common installs."""
     del runtime
     return {
-        "title": "Override Godot AI with a fork (Grok Build + Lumina)",
+        "title": "Connect Godot AI to Grok Build (and related clients)",
         "mcp_url": "http://127.0.0.1:8000/mcp",
         "grok_config_toml": (
             '[mcp_servers.godot-ai]\nurl = "http://127.0.0.1:8000/mcp"\nenabled = true\n'
         ),
         "options": [
             {
-                "name": "physical_copy",
+                "name": "dock_configure",
                 "steps": [
-                    "Clone fork: git clone https://github.com/shelbykb2/godot-ai.git",
-                    "Copy plugin/addons/godot_ai into YourProject/addons/godot_ai",
-                    "Enable plugin in Project Settings > Plugins",
-                    "Dock: Configure 'Grok Build' (or write ~/.grok/config.toml)",
+                    "Install the Godot AI plugin under res://addons/godot_ai and enable it",
+                    "Open the Godot AI dock → Clients → Grok Build → Configure",
+                    "Confirm ~/.grok/config.toml has [mcp_servers.godot-ai] with the MCP URL",
+                    "Restart or reload Grok Build so it picks up the MCP server",
                 ],
             },
             {
-                "name": "directory_junction_dev",
+                "name": "manual_toml",
                 "steps": [
-                    "Remove YourProject/addons/godot_ai",
-                    "mklink /J project\\addons\\godot_ai fork\\plugin\\addons\\godot_ai",
-                    "Restart Godot; edits in the fork appear immediately",
-                    "Self-update is blocked on junctions — intentional for dev",
+                    "Create or edit ~/.grok/config.toml "
+                    "(Windows: %USERPROFILE%\\.grok\\config.toml)",
+                    'Add: [mcp_servers.godot-ai] url = "http://127.0.0.1:8000/mcp" '
+                    "enabled = true",
+                    "Ensure the Godot editor is running with the plugin so the server is up",
                 ],
             },
             {
                 "name": "external_python_server",
                 "steps": [
-                    "python -m godot_ai --transport streamable-http --port 8000 --reload",
-                    "Plugin adopts existing server on :8000",
-                    "Grok keeps url http://127.0.0.1:8000/mcp",
+                    "From a godot-ai checkout: "
+                    "python -m godot_ai --transport streamable-http --port 8000",
+                    "Plugin adopts an existing server on :8000 when already listening",
+                    "Point Grok at http://127.0.0.1:8000/mcp",
+                ],
+            },
+            {
+                "name": "dev_checkout_junction",
+                "steps": [
+                    "For local development, junction/symlink project addons/godot_ai → "
+                    "checkout/plugin/addons/godot_ai so the plugin finds the fork .venv",
+                    "Optional: set GODOT_AI_VENV_PYTHON to the checkout .venv python",
+                    "Plugin versions with PEP 440 local tags (e.g. 3.0.2+local.1) pin uvx "
+                    "to the base PyPI version; prefer the dev venv for extras not on PyPI",
                 ],
             },
         ],
-        "docs": "docs/FORK_INSTALL.md",
-        "upstream_pr_policy": (
-            "Only open PRs to hi-godot/godot-ai when ruff, pytest, GDScript tests, "
-            "and tool_catalog parity are green and features are generic (not game-specific)."
-        ),
+        "docs": [
+            "README.md (install + clients)",
+            "docs/TOOLS.md (workflow_manage ops)",
+            "docs/port-conflicts.md (MCP URL / ports)",
+        ],
     }

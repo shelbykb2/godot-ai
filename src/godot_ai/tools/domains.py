@@ -40,7 +40,7 @@ DOMAINS: tuple[str, ...] = (
     "autoload",
     "input_map",
     "game",
-    "grok",
+    "workflow",
     "testing",
     "batch",
     "ui",

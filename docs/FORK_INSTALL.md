@@ -1,110 +1,79 @@
 # Installing a godot-ai fork (Grok Build + project override)
 
 This fork ([shelbykb2/godot-ai](https://github.com/shelbykb2/godot-ai)) tracks
-[hi-godot/godot-ai](https://github.com/hi-godot/godot-ai) and adds:
+[hi-godot/godot-ai](https://github.com/hi-godot/godot-ai) and adds packaging for
+local development plus contributions staged as upstream PRs.
+
+## What is on this fork
 
 1. **Grok Build** client descriptor (dock **Configure** → `~/.grok/config.toml`)
-2. **`grok_manage`** workflow tools (modeling, asset pipeline, screenshot/visual QA, install hints)
+2. **`workflow_manage`** agent helpers (modeling, asset pipeline, screenshot/visual QA, install hints)  
+   *(formerly experimental `grok_manage` — renamed for upstream generality)*
 3. **Junction-aware** server discovery (`DirAccess.read_link` → fork `.venv`)
+4. **PEP 440 local tags** stripped for uvx pins (`3.0.2+grok.2` → `3.0.2`)
+5. Nil-lifecycle guard during dual-plugin reload races
 
-## Status: fork-only (no upstream PR)
+## Upstream PR policy
 
-**Do not open a PR to hi-godot from this branch tip.** A review found that
-`grok_manage` content and fork branding are not trunk-ready for all users.
-Keep changes on **shelbykb2**. Optional later: tiny infra-only PRs (junction
-realpath, nil-lifecycle guard) without Grok tools or `+grok` versions.
+Prefer **small, generic PRs** to hi-godot. Do **not** send this whole branch tip:
 
 | Piece | Upstream? |
 |-------|-----------|
-| Grok client descriptor | Maybe later (alone + tests) |
-| `grok_manage` domain | No (fork / agent skills) |
-| Version `3.0.2+grok.1` | No (local only) |
-| Junction `read_link` + venv walk | Maybe later (generalized) |
+| Grok client descriptor | Yes (client PR) |
+| `workflow_manage` domain | Yes (workflow PR; generic copy) |
+| Junction `read_link` + venv walk + `_pypi_pin_version` | Yes (infra PR) |
+| Nil lifecycle guard | Yes (safety PR) |
+| Version `3.0.2+grok.*` | **No** (local only) |
+| This FORK_INSTALL doc | **No** |
+
+Suggested stack: nil-guard → junction/pin → Grok client → workflow_manage.
 
 ## Local fork version
 
 | Field | Value |
 |-------|--------|
-| Plugin / package version | **`3.0.2+grok.1`** |
+| Plugin / package version | **`3.0.2+grok.2`** |
 | Description | Godot AI *(shelbykb2 fork + Grok)* |
 
-## Paths (Lumina machine)
+## Paths (example machine)
 
 | Role | Path |
 |------|------|
-| Fork checkout | `C:\Users\bellf\OneDrive\Documents\godot-ai` |
-| Plugin source | `...\godot-ai\plugin\addons\godot_ai` |
-| Game project | `C:\Users\bellf\OneDrive\Documents\lumina` |
-| Plugin in game | `...\lumina\addons\godot_ai` (**junction preferred**) |
-| Backups only | `C:\Users\bellf\OneDrive\Documents\lumina-plugin-backups\` (**outside** `res://`) |
+| Fork checkout | `…/godot-ai` |
+| Plugin source | `…/godot-ai/plugin/addons/godot_ai` |
+| Game project | `…/your-game` |
+| Plugin in game | `…/your-game/addons/godot_ai` (**junction preferred**) |
+| Backups only | **Outside** `res://` (never under the project tree) |
 
 ## Override the stock plugin
 
 ### Option A — Directory junction (recommended)
 
-Live edits to the fork appear in Lumina. Self-update cannot clobber the junction.
-
 ```powershell
-$FORK   = "C:\Users\bellf\OneDrive\Documents\godot-ai\plugin\addons\godot_ai"
-$LUMINA = "C:\Users\bellf\OneDrive\Documents\lumina\addons\godot_ai"
-$BAK    = "C:\Users\bellf\OneDrive\Documents\lumina-plugin-backups"
+$FORK   = "C:\path\to\godot-ai\plugin\addons\godot_ai"
+$GAME   = "C:\path\to\your-game\addons\godot_ai"
+$BAK    = "C:\path\to\plugin-backups"
 
 New-Item -ItemType Directory -Force -Path $BAK | Out-Null
 
-# If godot_ai is a real folder (not a junction), back it up OUTSIDE the project
-$item = Get-Item $LUMINA -Force -ErrorAction SilentlyContinue
+$item = Get-Item $GAME -Force -ErrorAction SilentlyContinue
 if ($item -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-  Copy-Item -Recurse -Force $LUMINA "$BAK\godot_ai.bak-$(Get-Date -Format yyyyMMddHHmmss)"
-  Remove-Item -Recurse -Force $LUMINA
+  Copy-Item -Recurse -Force $GAME "$BAK\godot_ai.bak-$(Get-Date -Format yyyyMMddHHmmss)"
+  Remove-Item -Recurse -Force $GAME
 } elseif ($item) {
-  # Already a junction/symlink: remove link only
-  cmd /c rmdir "$LUMINA"
+  cmd /c rmdir "$GAME"
 }
 
-cmd /c mklink /J "$LUMINA" "$FORK"
+cmd /c mklink /J "$GAME" "$FORK"
 ```
 
-**Check:** `dir ...\lumina\addons` shows `<JUNCTION> godot_ai`; `plugin.cfg` has `version="3.0.2+grok.1"`.
+**Check:** `dir …\addons` shows `<JUNCTION> godot_ai`; `plugin.cfg` has `version="3.0.2+grok.2"`.
 
 ### Option B — Physical copy
 
 ```powershell
-$FORK   = "C:\Users\bellf\OneDrive\Documents\godot-ai\plugin\addons\godot_ai"
-$LUMINA = "C:\Users\bellf\OneDrive\Documents\lumina\addons\godot_ai"
-$BAK    = "C:\Users\bellf\OneDrive\Documents\lumina-plugin-backups"
-New-Item -ItemType Directory -Force -Path $BAK | Out-Null
-Copy-Item -Recurse -Force $LUMINA "$BAK\godot_ai.bak-$(Get-Date -Format yyyyMMddHHmmss)"
-Remove-Item -Recurse -Force $LUMINA
-Copy-Item -Recurse -Force $FORK $LUMINA
+Copy-Item -Recurse -Force $FORK $GAME
 ```
-
-Physical copy does **not** auto-find the fork `.venv`. Set:
-
-```powershell
-[System.Environment]::SetEnvironmentVariable(
-  "GODOT_AI_VENV_PYTHON",
-  "C:\Users\bellf\OneDrive\Documents\godot-ai\.venv\Scripts\python.exe",
-  "User"
-)
-```
-
-…or start the server manually (Option C).
-
-### Option C — External Python server
-
-```powershell
-cd C:\Users\bellf\OneDrive\Documents\godot-ai
-.\script\setup-dev.ps1   # once
-.venv\Scripts\python.exe -m godot_ai --transport streamable-http --port 8000 --reload
-```
-
-Open Lumina with the plugin enabled; it adopts port **8000**.
-
-## Never do this
-
-- Backup under `addons/godot_ai.bak*` or `res://_plugin_backups` (double plugin load / parse spam).
-- Leave `tools/_t3d_extract` or kit extract trees without `.gdignore` if they duplicate addons.
-- Click dock **Update** to stock GitHub **3.0.2** over the fork.
 
 ## Grok MCP entry
 
@@ -120,21 +89,21 @@ Or: Godot AI dock → **Grok Build** → **Configure**.
 ## Expected Output log (success)
 
 ```
-MCP | using dev venv: C:\Users\bellf\OneDrive\Documents\godot-ai\.venv\Scripts\python.exe
+MCP | using dev venv: …\godot-ai\.venv\Scripts\python.exe
 ```
 
-**Not** `using uvx (godot-ai==3.0.2+grok.1)`.
+**Not** `using uvx (godot-ai==3.0.2+grok.2)`.
 
 If uvx still wins: run `setup-dev.ps1`, confirm junction, set `GODOT_AI_VENV_PYTHON`, reload plugin.
 
 ## Verify
 
-1. Plugins: one **Godot AI** at `3.0.2+grok.1`.
+1. Plugins: one **Godot AI** at `3.0.2+grok.2`.
 2. Dock: session connected.
 3. Client list includes **Grok Build**.
-4. Grok Build tools: `grok_manage` ops  
+4. Tools: `workflow_manage` ops  
    `modeling_guidance` · `asset_pipeline` · `screenshot_verify` · `visual_qa` · `install_hints`
-5. Lumina example: `modeling_guidance` with `style=stylized_ethereal`; `asset_pipeline` with `path=res://`.
+5. Example: `modeling_guidance` with `style=stylized_ethereal`; `asset_pipeline` with `path=res://`.
 
 ## Dev setup (fork contributors)
 
@@ -144,5 +113,5 @@ cd godot-ai
 git checkout feature/grok-client-and-tools
 .\script\setup-dev.ps1
 .venv\Scripts\Activate.ps1
-pytest -v tests/unit/test_grok_handlers.py
+pytest -v tests/unit/test_workflow_handlers.py tests/unit/test_tool_domains.py
 ```
